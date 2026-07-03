@@ -1,0 +1,47 @@
+seed: 7
+
+encoders:
+  # "stub" for offline dev; on the GPU box set the HF model names:
+  #   vision:   google/siglip-base-patch16-224
+  #   language: microsoft/Phi-3-mini-4k-instruct
+  vision: stub
+  language: stub
+
+data:
+  # "synthetic" for smoke training; "libero" once demo hdf5s are downloaded.
+  source: synthetic
+  synthetic_size: 512
+  libero_dir: datasets/libero
+  suite: libero_spatial
+  clip_len: 12
+  num_workers: 4
+
+belief:
+  lr: 3.0e-4
+  batch_size: 16
+  epochs: 20
+  kl_weight: 1.0e-3
+
+world_model:
+  lr: 3.0e-4
+  batch_size: 16
+  epochs: 20
+  free_bits: 1.0
+
+goal:
+  lr: 3.0e-4
+  batch_size: 64
+  epochs: 10
+  dataset_size: 4096
+
+decision:
+  lr: 3.0e-4
+  batch_size: 16
+  epochs: 10
+  lambda_max: 2.0
+
+checkpoints:
+  dir: checkpoints
+
+wandb:
+  project: via-model

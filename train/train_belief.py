@@ -1,0 +1,57 @@
+"""Train the belief state network (self-supervised next-observation prediction).
+
+    python -m train.train_belief                 # real run (config-driven)
+    python -m train.train_belief --smoke         # 1-epoch CPU sanity check
+
+Milestone check (June, weeks 3-4): after training, run
+eval/uncertainty_analysis.py and confirm sigma spikes on occluded frames.
+"""
+
+import torch
+from torch.utils.data import DataLoader
+
+from train import common
+from via.belief import BeliefStateNetwork
+
+
+def main() -> None:
+    args = common.base_parser(__doc__).parse_args()
+    cfg = common.load_config(args.config)
+    common.set_seed(cfg["seed"])
+    device = torch.device(args.device)
+
+    perception = common.build_perception(cfg, args.smoke).to(device)
+    belief_net = BeliefStateNetwork(kl_weight=cfg["belief"]["kl_weight"]).to(device)
+    dataset = common.build_trajectory_dataset(cfg, args.smoke)
+    loader = DataLoader(
+        dataset,
+        batch_size=2 if args.smoke else cfg["belief"]["batch_size"],
+        shuffle=True,
+        num_workers=0 if args.smoke else cfg["data"]["num_workers"],
+    )
+    opt = torch.optim.AdamW(belief_net.parameters(), lr=cfg["belief"]["lr"])
+    run = common.init_wandb(cfg, "belief-state", args.no_wandb or args.smoke)
+
+    epochs = 1 if args.smoke else cfg["belief"]["epochs"]
+    step = 0
+    for epoch in range(epochs):
+        for batch in loader:
+            frames = batch["frames"].to(device)
+            patches = common.encode_frames(perception, frames)
+            losses = belief_net.loss(patches)
+            opt.zero_grad()
+            losses["loss"].backward()
+            torch.nn.utils.clip_grad_norm_(belief_net.parameters(), 10.0)
+            opt.step()
+            common.log_metrics(run, losses, step)
+            step += 1
+            if args.smoke and step >= 3:
+                break
+        common.save_checkpoint(belief_net, cfg, "belief")
+
+    if run is not None:
+        run.finish()
+
+
+if __name__ == "__main__":
+    main()

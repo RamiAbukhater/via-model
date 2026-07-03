@@ -1,0 +1,12 @@
+[project]
+name = "via-model"
+version = "0.1.0"
+description = "VIA: Vision-Inference-Action — a cognitively grounded VLA architecture"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.setuptools.packages.find]
+include = ["via*", "train*", "eval*"]

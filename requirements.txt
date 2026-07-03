@@ -1,0 +1,19 @@
+# Core (needed everywhere, including CPU-only dev)
+torch>=2.2
+numpy>=1.24
+pyyaml>=6.0
+pytest>=8.0
+
+# Encoders + data (needed on the training/eval machine)
+# transformers requires torch>=2.4 to load models; on the GPU box install both.
+transformers>=4.44
+h5py>=3.10
+pillow>=10.0
+
+# Experiment tracking
+wandb>=0.17
+
+# Simulation (GPU/eval box only) — install LIBERO from source:
+#   git clone https://github.com/Lifelong-Robot-Learning/LIBERO.git
+#   cd LIBERO && pip install -e .
+# plus: pip install robosuite==1.4.1 bddl easydict
