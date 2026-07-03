@@ -1,0 +1,46 @@
+# Expanse (SDSC) config: real encoders, LIBERO data, scratch storage.
+# EDIT the two REPLACE_WITH_USERNAME paths to your Expanse username.
+
+seed: 7
+
+encoders:
+  vision: google/siglip-base-patch16-224
+  language: microsoft/Phi-3-mini-4k-instruct
+
+data:
+  source: libero
+  synthetic_size: 512
+  libero_dir: /expanse/lustre/scratch/REPLACE_WITH_USERNAME/temp_project/datasets/libero
+  suite: libero_spatial
+  clip_len: 16
+  num_workers: 8
+
+belief:
+  lr: 3.0e-4
+  batch_size: 16
+  epochs: 20
+  kl_weight: 1.0e-3
+
+world_model:
+  lr: 3.0e-4
+  batch_size: 16
+  epochs: 20
+  free_bits: 1.0
+
+goal:
+  lr: 3.0e-4
+  batch_size: 64
+  epochs: 10
+  dataset_size: 4096
+
+decision:
+  lr: 3.0e-4
+  batch_size: 16
+  epochs: 10
+  lambda_max: 2.0
+
+checkpoints:
+  dir: /expanse/lustre/scratch/REPLACE_WITH_USERNAME/temp_project/checkpoints
+
+wandb:
+  project: via-model
