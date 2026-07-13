@@ -22,6 +22,7 @@ def main() -> None:
 
     perception = common.build_perception(cfg, args.smoke).to(device)
     belief_net = BeliefStateNetwork(kl_weight=cfg["belief"]["kl_weight"]).to(device)
+    common.try_resume(belief_net, cfg, "belief", args.device, args.resume)
     dataset = common.build_trajectory_dataset(cfg, args.smoke)
     loader = DataLoader(
         dataset,

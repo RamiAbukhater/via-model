@@ -28,6 +28,7 @@ def main() -> None:
     belief_net.eval()
 
     rssm = RSSM(free_bits=cfg["world_model"]["free_bits"]).to(device)
+    common.try_resume(rssm, cfg, "world_model", args.device, args.resume)
     dataset = common.build_trajectory_dataset(cfg, args.smoke)
     loader = DataLoader(
         dataset,

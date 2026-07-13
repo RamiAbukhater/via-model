@@ -48,6 +48,8 @@ def main() -> None:
 
     utility = UtilityHead().to(device)
     gate = AdaptiveGate(lambda_max=cfg["decision"]["lambda_max"]).to(device)
+    common.try_resume(utility, cfg, "utility", args.device, args.resume)
+    common.try_resume(gate, cfg, "gate", args.device, args.resume)
 
     dataset = common.build_trajectory_dataset(cfg, args.smoke)
     loader = DataLoader(dataset, batch_size=2 if args.smoke else cfg["decision"]["batch_size"],

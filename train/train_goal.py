@@ -27,6 +27,7 @@ def main() -> None:
 
     language = common.build_language(cfg, args.smoke).to(device)
     goal_net = GoalInferenceRSA().to(device)
+    common.try_resume(goal_net, cfg, "goal", args.device, args.resume)
 
     # Belief context: use the trained belief net over synthetic frames when
     # available; a zero belief (uninformative context) otherwise. Synthetic

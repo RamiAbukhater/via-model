@@ -20,12 +20,20 @@ PHI3_MODEL = "microsoft/Phi-3-mini-4k-instruct"
 class Phi3LanguageEncoder(nn.Module):
     """Frozen Phi-3-mini. Requires `transformers` and torch>=2.4 (GPU box)."""
 
-    def __init__(self, model_name: str = PHI3_MODEL, max_length: int = 64):
+    def __init__(
+        self,
+        model_name: str = PHI3_MODEL,
+        max_length: int = 64,
+        dtype: torch.dtype = torch.float16,
+    ):
+        # fp16 by default: the encoder is frozen (inference only) and fp16
+        # halves memory to ~7.6 GB, fitting the 11 GB GPUs on UCSD DSMLP.
+        # Hidden states are cast back to fp32 before returning.
         super().__init__()
         from transformers import AutoModel, AutoTokenizer
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.encoder = AutoModel.from_pretrained(model_name, torch_dtype=torch.float32)
+        self.encoder = AutoModel.from_pretrained(model_name, torch_dtype=dtype)
         self.encoder.eval()
         for p in self.encoder.parameters():
             p.requires_grad_(False)
@@ -42,7 +50,7 @@ class Phi3LanguageEncoder(nn.Module):
             max_length=self.max_length,
         ).to(device)
         hidden = self.encoder(**batch).last_hidden_state  # (B, L, 3072)
-        return hidden, batch["attention_mask"].bool()
+        return hidden.float(), batch["attention_mask"].bool()
 
 
 class StubLanguageEncoder(nn.Module):

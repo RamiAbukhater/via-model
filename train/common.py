@@ -1,6 +1,7 @@
 """Shared training utilities: config, seeding, encoder factories, W&B, checkpoints."""
 
 import argparse
+import os
 import random
 from pathlib import Path
 
@@ -14,7 +15,11 @@ DEFAULT_CONFIG = REPO_ROOT / "configs" / "default.yaml"
 
 def load_config(path: str | Path | None = None) -> dict:
     with open(path or DEFAULT_CONFIG) as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f)
+    # Expand ~ and $VARS so the same config works across clusters/users.
+    for section, key in (("data", "libero_dir"), ("checkpoints", "dir")):
+        cfg[section][key] = os.path.expandvars(os.path.expanduser(cfg[section][key]))
+    return cfg
 
 
 def base_parser(description: str) -> argparse.ArgumentParser:
@@ -24,6 +29,9 @@ def base_parser(description: str) -> argparse.ArgumentParser:
     p.add_argument("--no-wandb", action="store_true")
     p.add_argument("--smoke", action="store_true",
                    help="tiny synthetic run on stub encoders (CPU-friendly CI check)")
+    p.add_argument("--resume", action="store_true",
+                   help="warm-start from an existing checkpoint if one exists "
+                        "(for clusters with session time limits, e.g. DSMLP)")
     return p
 
 
@@ -102,6 +110,16 @@ def load_checkpoint(module: torch.nn.Module, cfg: dict, name: str, device: str) 
     path = checkpoint_path(cfg, name)
     module.load_state_dict(torch.load(path, map_location=device))
     return module
+
+
+def try_resume(module: torch.nn.Module, cfg: dict, name: str, device: str, enabled: bool) -> None:
+    """Warm-start `module` from its checkpoint when --resume is set and one exists."""
+    if not enabled:
+        return
+    path = checkpoint_path(cfg, name)
+    if path.exists():
+        module.load_state_dict(torch.load(path, map_location=device))
+        print(f"resumed {name} from {path}")
 
 
 @torch.no_grad()
