@@ -20,7 +20,11 @@ if [ ! -d "$ENV" ]; then
 fi
 source "$ENV/bin/activate"
 pip install --upgrade pip
-pip install "torch>=2.4" "transformers>=4.44" h5py pyyaml wandb pytest pillow matplotlib
+# cu121 build: DSMLP GPU nodes run a CUDA 12.2 driver, which is too old for
+# the default (cu126+) wheels but fine for cu121.
+pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+pip install "transformers>=4.44" h5py pyyaml wandb pytest pillow matplotlib
+pip cache purge   # keep the multi-GB wheel cache out of the home quota
 
 # --- LIBERO (dataset download + offline API; sim eval needs working EGL/OSMesa) ---
 if [ ! -d "$HOME/LIBERO" ]; then
