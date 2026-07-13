@@ -22,6 +22,15 @@ export HF_HOME="$HOME/via-hf"
 export MUJOCO_GL=egl          # headless rendering; try osmesa if EGL fails
 mkdir -p logs
 
+# LIBERO data lives in pod-local /tmp (outside the home quota, ephemeral per
+# pod). Fetch it if this pod doesn't have it yet — fast on the campus network.
+LIBERO_DIR=/tmp/via-libero
+if [ ! -d "$LIBERO_DIR" ]; then
+    echo "downloading LIBERO dataset to pod-local scratch ($LIBERO_DIR)..."
+    python "$HOME/LIBERO/benchmark_scripts/download_libero_datasets.py" \
+        --download-dir "$LIBERO_DIR" --datasets libero_spatial
+fi
+
 MODULE="$1"; shift || true
 LOG="logs/$(echo "$MODULE" | tr '.' '-')-$(date +%m%d-%H%M).log"
 echo "logging to $LOG"

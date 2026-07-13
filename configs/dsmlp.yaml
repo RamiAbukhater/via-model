@@ -10,7 +10,10 @@ encoders:
 data:
   source: libero
   synthetic_size: 512
-  libero_dir: ~/via-data/libero
+  # Pod-local scratch: doesn't count against the home-dir quota. Ephemeral —
+  # hpc/dsmlp_train.sh re-downloads it automatically when missing (~1-2 min
+  # on the campus network).
+  libero_dir: /tmp/via-libero
   suite: libero_spatial
   clip_len: 16
   num_workers: 4
