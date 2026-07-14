@@ -22,7 +22,10 @@ belief:
   lr: 3.0e-4
   batch_size: 16
   epochs: 20
-  kl_weight: 1.0e-3
+  # 1e-3 collapsed on LIBERO: a step-2.3k optimization spike tripled the KL
+  # and sigma pinned at the floor (occluded/visible ratio 1.00). The stronger
+  # leash keeps the posterior anchored so variance stays informative.
+  kl_weight: 1.0e-2
 
 world_model:
   lr: 3.0e-4
