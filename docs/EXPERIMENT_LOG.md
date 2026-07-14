@@ -99,4 +99,37 @@ in-distribution.
 (0.1-0.4) but the ratio is still ~1.0 even with augmentation, next suspects
 are the variance head's capacity/gradient path rather than the data.
 
+**Run 2 closing numbers** (recovered from the tmux scrollback): completed
+all 20 epochs (~8.8k steps); final mean sigma 0.058, KL ~5,900, NLL ~2.4k.
+The kl_weight bump did lift sigma off the floor (0.028 → 0.058) but not into
+the healthy band — consistent with the revised diagnosis that the data,
+not the objective weight, was the binding constraint.
+
+---
+
+## 2026-07-14 — Run 3 (augmented): healthy training, killed by infrastructure
+
+**Config:** kl_weight 1e-2 + occlude_p 0.5 (first augmented run), from scratch.
+
+**Observed:** NLL ~15k-53k and batch-noisy — *expected*, not a divergence:
+clips with blanked windows are genuinely hard to predict, and batches vary
+in how many they draw. mean sigma settled ~0.15, KL ~3,000. All healthy.
+
+**Death at epoch 6/20 (11:23):** the run was launched outside tmux; the ssh
+connection dropped and took the process with it (no traceback — clean stop
+after the epoch-6 checkpoint save). The 0713 overnight pod's scary
+`exit code 137 / CompletedDeadlineExceeded` message was unrelated: run 2 had
+already finished; the idle pod simply hit its 6 h deadline at 2 AM.
+
+**Action:** resumed from the epoch-6 checkpoint inside tmux (run 3b, log
+`0714-1645`, W&B run `occw0oia`). Note: resume restores weights but not the
+Adam state; early post-resume NLL is elevated (~200k) and should settle —
+under monitoring.
+
+**Process change:** training babysitting is now automated — a recurring
+monitor reads the DSMLP logs over ssh (ControlMaster), restarts dead runs
+inside tmux, applies diagnosed fixes (committed + logged), and runs the
+calibration eval on completion. Escalation rule: same failure surviving two
+distinct fixes → stop and consult.
+
 ---
