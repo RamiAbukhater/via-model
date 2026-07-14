@@ -14,6 +14,24 @@ from train import common
 from via.belief import BeliefStateNetwork
 
 
+def occlude_clips(frames: torch.Tensor, p: float, max_len: int = 4) -> torch.Tensor:
+    """Sensor-dropout augmentation: blank a random window per clip with prob p.
+
+    LIBERO demos contain no occlusions, so without this the next observation
+    is always predictable and the NLL never pressures sigma to rise — the
+    variance head comes out flat (occ/vis ratio 1.00 in runs 1-2). Blanked
+    windows force the belief to admit uncertainty while blind.
+    """
+    B, T = frames.shape[:2]
+    frames = frames.clone()
+    for b in range(B):
+        if T >= 6 and torch.rand(()) < p:
+            length = int(torch.randint(2, max_len + 1, ()))
+            start = int(torch.randint(1, T - length, ()))
+            frames[b, start : start + length] = 0.0
+    return frames
+
+
 def main() -> None:
     args = common.base_parser(__doc__).parse_args()
     cfg = common.load_config(args.config)
@@ -38,6 +56,9 @@ def main() -> None:
     for epoch in range(epochs):
         for batch in loader:
             frames = batch["frames"].to(device)
+            occ_p = cfg["belief"].get("occlude_p", 0.0)
+            if occ_p > 0:
+                frames = occlude_clips(frames, occ_p)
             patches = common.encode_frames(perception, frames)
             losses = belief_net.loss(patches)
             opt.zero_grad()

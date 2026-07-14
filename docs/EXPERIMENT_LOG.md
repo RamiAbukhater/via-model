@@ -70,3 +70,33 @@ near 1, underfit).
 **Status:** retrain launched 2026-07-13 evening. Ratio verdict pending.
 
 ---
+
+## 2026-07-14 — Belief run 2: ratio still 1.00 → root cause is the data, not the objective
+
+**Config:** as run 1 but kl_weight **1e-2**. Trained to completion overnight.
+
+**Result:** occluded/visible sigma ratio = **1.000** again.
+
+**Revised diagnosis.** Two identical ratio failures under different KL
+weights rule out the optimization story as the root cause. The real issue:
+**LIBERO demonstrations contain no occlusions** — every next observation in
+training is predictable, so the NLL objective never once pressured sigma to
+rise, and the variance head had no reason to become input-dependent. The
+kl_weight bump addressed the sigma-floor symptom (run 1's collapse) but
+cannot create sensitivity to observability that the data never demanded.
+(The synthetic trajectory dataset was designed with occlusion windows for
+exactly this reason; the LIBERO clips lack the equivalent pressure.)
+
+**Intervention: occlusion augmentation (sensor dropout).** During belief
+training, each clip has probability `occlude_p = 0.5` of a random 2-4 frame
+window blanked to zeros (`occlude_clips` in `train/train_belief.py`). The
+network now repeatedly experiences going blind and is penalized (NLL at the
+reveal frames) for remaining confident through it — direct training pressure
+for sigma to rise under occlusion, and it makes the evaluation probe
+in-distribution.
+
+**Expected outcome:** run 3 ratio clearly > 1.0. If mean sigma is healthy
+(0.1-0.4) but the ratio is still ~1.0 even with augmentation, next suspects
+are the variance head's capacity/gradient path rather than the data.
+
+---

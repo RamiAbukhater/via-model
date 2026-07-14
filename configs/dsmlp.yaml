@@ -26,6 +26,11 @@ belief:
   # and sigma pinned at the floor (occluded/visible ratio 1.00). The stronger
   # leash keeps the posterior anchored so variance stays informative.
   kl_weight: 1.0e-2
+  # Sensor-dropout augmentation: prob of blanking a 2-4 frame window per
+  # clip. Required for calibrated variance — LIBERO demos have no natural
+  # occlusions, so without it sigma has no reason to be input-dependent
+  # (runs 1-2 both scored occ/vis ratio 1.00).
+  occlude_p: 0.5
 
 world_model:
   lr: 3.0e-4

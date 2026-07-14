@@ -20,7 +20,8 @@ belief:
   lr: 3.0e-4
   batch_size: 16
   epochs: 20
-  kl_weight: 1.0e-3
+  kl_weight: 1.0e-2
+  occlude_p: 0.5   # sensor-dropout augmentation; see configs/dsmlp.yaml note
 
 world_model:
   lr: 3.0e-4
