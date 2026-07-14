@@ -21,6 +21,29 @@ from via.belief import BeliefStateNetwork
 from via.data.synthetic import SyntheticTrajectoryDataset
 
 
+def libero_occlusion_clips(cfg: dict, n_clips: int):
+    """LIBERO clips with a 3-frame occlusion window blanked mid-clip.
+
+    In-domain occlusion probe: the belief net trained on LIBERO frames, so
+    the sigma comparison is between visible and blanked frames of the same
+    distribution (a domain-matched version of the synthetic occlusion test).
+    Clips are drawn with a fixed held-out seed.
+    """
+    from via.data.libero import LiberoTrajectoryDataset
+
+    ds = LiberoTrajectoryDataset(cfg["data"]["libero_dir"], clip_len=cfg["data"]["clip_len"])
+    idx = torch.randperm(len(ds), generator=torch.Generator().manual_seed(999))[:n_clips]
+    for i in idx.tolist():
+        item = ds[i]
+        T = item["frames"].shape[0]
+        occluded = torch.zeros(T, dtype=torch.bool)
+        start = T // 2 - 1
+        occluded[start : min(T, start + 3)] = True
+        frames = item["frames"].clone()
+        frames[occluded] = 0.0
+        yield {"frames": frames.unsqueeze(0), "occluded": occluded.unsqueeze(0)}
+
+
 @torch.no_grad()
 def sigma_traces(perception, belief_net, loader, device) -> list[dict]:
     rows = []
@@ -54,11 +77,15 @@ def main() -> None:
         common.load_checkpoint(belief_net, cfg, "belief", args.device)
     belief_net.eval()
 
-    # Held-out seed: never used in training (train datasets use seed=0 stream).
-    dataset = SyntheticTrajectoryDataset(
-        size=4 if args.smoke else args.clips, clip_len=cfg["data"]["clip_len"], seed=999
-    )
-    loader = DataLoader(dataset, batch_size=1)
+    # In-domain probe when the model trained on LIBERO; synthetic otherwise.
+    if not args.smoke and cfg["data"]["source"] == "libero":
+        loader = libero_occlusion_clips(cfg, args.clips)
+    else:
+        # Held-out seed: never used in training (train datasets use seed=0 stream).
+        dataset = SyntheticTrajectoryDataset(
+            size=4 if args.smoke else args.clips, clip_len=cfg["data"]["clip_len"], seed=999
+        )
+        loader = DataLoader(dataset, batch_size=1)
     rows = sigma_traces(perception, belief_net, loader, device)
 
     out_dir = common.REPO_ROOT / "results"
