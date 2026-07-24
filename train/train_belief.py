@@ -14,22 +14,31 @@ from train import common
 from via.belief import BeliefStateNetwork
 
 
-def occlude_clips(frames: torch.Tensor, p: float, max_len: int = 4) -> torch.Tensor:
+def occlude_clips(
+    frames: torch.Tensor, p: float, max_len: int = 4
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Sensor-dropout augmentation: blank a random window per clip with prob p.
 
     LIBERO demos contain no occlusions, so without this the next observation
     is always predictable and the NLL never pressures sigma to rise — the
     variance head comes out flat (occ/vis ratio 1.00 in runs 1-2). Blanked
     windows force the belief to admit uncertainty while blind.
+
+    Returns (frames, occluded) — the mask is also fed to BeliefStateNetwork.loss
+    so its anti-collapse variance term excludes blanked frames (otherwise the
+    blank/reveal jump alone satisfies the variance floor with no real motion
+    signal behind it).
     """
     B, T = frames.shape[:2]
     frames = frames.clone()
+    occluded = torch.zeros(B, T, dtype=torch.bool)
     for b in range(B):
         if T >= 6 and torch.rand(()) < p:
             length = int(torch.randint(2, max_len + 1, ()))
             start = int(torch.randint(1, T - length, ()))
             frames[b, start : start + length] = 0.0
-    return frames
+            occluded[b, start : start + length] = True
+    return frames, occluded
 
 
 def main() -> None:
@@ -39,7 +48,10 @@ def main() -> None:
     device = torch.device(args.device)
 
     perception = common.build_perception(cfg, args.smoke).to(device)
-    belief_net = BeliefStateNetwork(kl_weight=cfg["belief"]["kl_weight"]).to(device)
+    belief_net = BeliefStateNetwork(
+        kl_weight=cfg["belief"]["kl_weight"],
+        var_weight=cfg["belief"].get("var_weight", 1.0),
+    ).to(device)
     common.try_resume(belief_net, cfg, "belief", args.device, args.resume)
     dataset = common.build_trajectory_dataset(cfg, args.smoke)
     loader = DataLoader(
@@ -56,11 +68,15 @@ def main() -> None:
     for epoch in range(epochs):
         for batch in loader:
             frames = batch["frames"].to(device)
+            occluded = batch.get("occluded")
+            occluded = occluded.to(device).bool() if occluded is not None else None
             occ_p = cfg["belief"].get("occlude_p", 0.0)
             if occ_p > 0:
-                frames = occlude_clips(frames, occ_p)
+                frames, occ_aug = occlude_clips(frames, occ_p)
+                occ_aug = occ_aug.to(device)
+                occluded = occ_aug if occluded is None else (occluded | occ_aug)
             patches = common.encode_frames(perception, frames)
-            losses = belief_net.loss(patches)
+            losses = belief_net.loss(patches, occluded=occluded)
             opt.zero_grad()
             losses["loss"].backward()
             torch.nn.utils.clip_grad_norm_(belief_net.parameters(), 10.0)
