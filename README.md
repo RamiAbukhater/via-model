@@ -77,6 +77,18 @@ contribution of the epistemic-value term (`lambda0`), the goal *distribution*
 | End-to-end on a LIBERO suite | [eval/eval_libero.py](eval/eval_libero.py) |
 | λ=0 vs full ablation table | [eval/ablations.py](eval/ablations.py) |
 
+## Extra (outside the proposal)
+
+Not part of the original grant timeline or milestone table above — exploratory
+work kept clearly separate from the proposal deliverables:
+
+```bash
+python -m eval.integration_probe      # encoding-vs-integration probe ("memory without meaning")
+```
+
+See [docs/embodied_comprehension_bridge.md](docs/embodied_comprehension_bridge.md)
+for the framing (grounded-cognition angle on VIA) this eval comes from.
+
 ## Repo layout
 
 ```
