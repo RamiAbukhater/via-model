@@ -3,6 +3,8 @@
 **Toward Cognitively Grounded VLA Models** — perception as inference, language
 as evidence, action as decision. (SDUTC Track 2, Research.)
 
+Claude was used in the development of this project.
+
 Standard VLAs map observations directly to actions with no uncertainty, no
 memory, and no planning. VIA replaces that stimulus-response mapping with four
 modules, each implementing a principle from Bayesian cognitive science, with
@@ -79,7 +81,7 @@ contribution of the epistemic-value term (`lambda0`), the goal *distribution*
 
 ## Extra (outside the proposal)
 
-Not part of the original grant timeline or milestone table above — exploratory
+Not part of the original grant timeline or milestone table above; exploratory
 work kept clearly separate from the proposal deliverables:
 
 ```bash

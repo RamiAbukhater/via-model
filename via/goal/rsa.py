@@ -98,9 +98,8 @@ class GoalInferenceRSA(nn.Module):
     ) -> torch.Tensor:
         """Public accessor for the grounded utterance embedding (B, d_model).
 
-        Exposes _utterance_embedding for eval/integration_probe.py, which
-        contrasts how distinctly an instruction is *encoded* here against how
-        much it moves the goal posterior (*integrated*) — see
+        Used by eval/integration_probe.py to compare how an instruction is
+        encoded here against how much it moves the goal posterior. See
         docs/embodied_comprehension_bridge.md, Q3.
         """
         return self._utterance_embedding(lang_tokens, lang_mask, belief_mu)

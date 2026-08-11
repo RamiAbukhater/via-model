@@ -22,29 +22,14 @@ belief:
   epochs: 20
   kl_weight: 1.0e-2
   occlude_p: 0.5   # sensor-dropout augmentation; see configs/dsmlp.yaml note
-  # VICReg-style variance floor on obs_embed (the pooled observation
-  # embedding), computed within each clip across time. Without it, encode_obs
-  # can trivially minimize the next-obs NLL by collapsing to a near-constant
-  # vector regardless of input, since its own no-grad copy is the prediction
-  # target — confirmed empirically (obs_embed moved <1% of its norm across a
-  # clip where the object crossed the whole canvas). A batch-wide (not
-  # per-clip) variance floor was tried first and didn't fix it: the network
-  # satisfied it for free via between-clip differences (color, start
-  # position) while staying flat across time within a clip. This broke the
-  # world-model milestone: a rollout that can't beat the naive persistence
-  # baseline because nothing in the target embedding varies for it to predict.
-  # 1.0 and 20.0 were both tried on the full 20-epoch run and both looked
-  # fine in short/hand-rolled trials but rebounded toward 1.0 partway through
-  # the real run whenever an optimization spike hit (same instability
-  # pattern as the kl_weight story below) — the network re-collapsed to cut
-  # NLL since nothing held it back. Note: a hand-rolled reimplementation of
-  # the training loop is *not* a faithful stand-in for this — it diverges
-  # from train_belief.py's actual RNG state (model init order, DataLoader
-  # worker seeding) and gave misleadingly stable numbers for weight=20 that
-  # did not reproduce when run for real. Trials must go through
-  # train.train_belief itself (a short --config with fewer epochs is fine).
-  # 100.0, tested this way for 8 epochs, gave a steady, non-rebounding
-  # descent (var_loss 1.0 -> 0.33 by step 250) unlike 1.0/20.0's oscillation.
+  # Variance floor on obs_embed (VICReg-style), per clip, across time,
+  # visible frames only. Without it encode_obs can collapse to a
+  # near-constant vector and still minimize the next-obs NLL, since its own
+  # no-grad copy is the prediction target — starves the world model of
+  # positional signal. A batch-wide (not per-clip) floor didn't fix it: the
+  # network satisfied it via between-clip differences instead of within-clip
+  # motion. 1.0 and 20.0 looked fine in short trials but rebounded toward
+  # collapse partway through a real full run; 100.0 held a steady descent.
   var_weight: 100.0
 
 world_model:

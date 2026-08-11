@@ -20,14 +20,12 @@ def occlude_clips(
     """Sensor-dropout augmentation: blank a random window per clip with prob p.
 
     LIBERO demos contain no occlusions, so without this the next observation
-    is always predictable and the NLL never pressures sigma to rise — the
-    variance head comes out flat (occ/vis ratio 1.00 in runs 1-2). Blanked
-    windows force the belief to admit uncertainty while blind.
+    is always predictable and the NLL never pressures sigma to rise (occ/vis
+    ratio 1.00 in runs 1-2). Blanked windows force the belief to admit
+    uncertainty while blind.
 
-    Returns (frames, occluded) — the mask is also fed to BeliefStateNetwork.loss
-    so its anti-collapse variance term excludes blanked frames (otherwise the
-    blank/reveal jump alone satisfies the variance floor with no real motion
-    signal behind it).
+    Returns (frames, occluded); the mask also feeds BeliefStateNetwork.loss
+    so its anti-collapse variance term excludes blanked frames.
     """
     B, T = frames.shape[:2]
     frames = frames.clone()

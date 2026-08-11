@@ -129,24 +129,15 @@ class BeliefStateNetwork(nn.Module):
         Gaussian NLL makes the belief variance an honest uncertainty estimate.
         A small KL(b_t || N(0, I)) keeps the latent well-scaled.
 
-        obs_embed itself (encode_obs's output) is trainable and its *own*
-        no-grad copy is the NLL's prediction target — nothing but variance
-        regularization stops the pooling head from collapsing to a
-        near-constant vector, which would trivially minimize the NLL while
-        carrying no positional/dynamics information (confirmed empirically:
-        pre-fix, obs_embed moved <1% of its norm across a clip while the
-        underlying patch embeddings moved substantially). var_loss is a
-        VICReg-style variance floor (Bardes et al. 2022) computed *within
-        each clip, across time, over visible frames only*. Two cheaper
-        variants were tried and both got gamed instead of fixing the real
-        problem: floored across the whole batch, the network satisfied it
-        for free via between-clip differences (color, start position) while
-        staying flat across time within a clip; floored across all frames of
-        a clip (visible and occluded), it satisfied it for free via the
-        blank/reveal jump at an occlusion window's edges while staying flat
-        across every genuinely-visible-but-moving frame. `occluded` (B, T)
-        excludes blanked frames from the statistic so only real motion can
-        satisfy it — the world model needs exactly that signal.
+        obs_embed's own no-grad copy is the NLL's prediction target, so
+        nothing stops the pooling head from collapsing to a near-constant
+        vector and still minimizing the loss. var_loss is a VICReg-style
+        variance floor (Bardes et al. 2022), computed per clip, across time,
+        over visible frames only. A batch-wide floor is satisfied for free
+        by between-clip differences (color, start position); an
+        all-frames floor is satisfied for free by the occlusion blank/reveal
+        jump. Restricting to visible frames within a clip forces real motion
+        to be the only way to satisfy it. `occluded` is (B, T).
         """
         B, T = patches_seq.shape[:2]
         if T < 2:

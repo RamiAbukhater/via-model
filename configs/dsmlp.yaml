@@ -31,14 +31,11 @@ belief:
   # occlusions, so without it sigma has no reason to be input-dependent
   # (runs 1-2 both scored occ/vis ratio 1.00).
   occlude_p: 0.5
-  # VICReg-style per-clip, across-time variance floor on obs_embed — see
-  # configs/default.yaml note. Without it, encode_obs can collapse to a
-  # near-constant vector and trivially minimize the next-obs NLL (its own
-  # no-grad copy is the target), starving the downstream world model of
-  # positional signal to predict. Discovered on the local CPU/synthetic
-  # path, 2026-07-22; 1.0 and 20.0 both rebounded toward collapse partway
-  # through a real full run despite looking stable in short trials — see
-  # configs/default.yaml note. 100.0 held a steady, non-rebounding descent.
+  # Per-clip, across-time variance floor on obs_embed — see
+  # configs/default.yaml note. Prevents encode_obs from collapsing to a
+  # near-constant vector to minimize the next-obs NLL. Found on the local
+  # CPU/synthetic path, 2026-07-22; 1.0 and 20.0 both rebounded toward
+  # collapse partway through a real full run, 100.0 held steady.
   var_weight: 100.0
 
 world_model:

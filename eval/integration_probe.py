@@ -1,31 +1,27 @@
 """EXTRA — not part of the original grant proposal/timeline. Companion eval
-for docs/embodied_comprehension_bridge.md, Q3 ("memory vs. meaning"): does an
-instruction that is linguistically *encoded* also get *integrated* into the
-goal posterior, or can the two come apart?
+for docs/embodied_comprehension_bridge.md, Q3: does an instruction that's
+linguistically encoded also get integrated into the goal posterior, or can
+the two come apart?
 
     encoding distance  = ||utterance_embedding(u) - utterance_embedding("")||
-                         — is u even represented differently from no
-                         instruction at all? (via/goal/rsa.py's grounded
-                         utterance embedding, via GoalInferenceRSA.utterance_embedding)
+                         (is u even represented differently from no
+                         instruction? via GoalInferenceRSA.utterance_embedding)
     integration index  = KL(L1(g|u,b) || L1(g|"",b))
-                         — how far u actually moves the goal posterior from
-                         the belief-only baseline.
+                         (how far u actually moves the goal posterior from
+                         the belief-only baseline)
     entropy drop       = H(L1(g|"",b)) - H(L1(g|u,b))
-                         — how much u narrows the posterior.
+                         (how much u narrows the posterior)
 
 Run over SyntheticInstructionDataset's three ambiguity levels (full
-instruction / object dropped / verb+object dropped). The prediction worth
-testing: encoding distance should stay roughly comparable across levels (the
-words differ from "no instruction" either way), while integration index and
-entropy drop should fall as ambiguity rises. Encoding without integration —
-a large encoding distance paired with a small integration index — is this
-system's analog of "memory without meaning" (the N400 finding in Mangardich
-& Sabbagh, carried over via docs/embodied_comprehension_bridge.md Q3).
+instruction / object dropped / verb+object dropped). Expectation: encoding
+distance stays roughly flat across levels, while integration index and
+entropy drop fall as ambiguity rises. A large encoding distance paired with
+a small integration index is this system's analog of "memory without
+meaning" (Mangardich & Sabbagh's N400 finding).
 
-Left out of scope here: the doc's N400 *surprise* analog (a world-model
-rollout that contradicts the instruction) needs language to condition the
-world model, which VIA does not currently wire — that's Q1 territory, a
-separate, larger change, not bundled into this probe.
+Not covered here: the N400 surprise analog (a world-model rollout that
+contradicts the instruction) needs language to condition the world model,
+which VIA doesn't wire yet — that's Q1 territory.
 
     python -m eval.integration_probe            # trained goal ckpt + config
     python -m eval.integration_probe --smoke     # untrained, CPU sanity check
