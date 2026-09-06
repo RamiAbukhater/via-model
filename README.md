@@ -44,6 +44,16 @@ python LIBERO/benchmark_scripts/download_libero_datasets.py --datasets libero_sp
 then set `encoders.vision/language` to the HF model names and
 `data.source: libero` in [configs/default.yaml](configs/default.yaml).
 
+**Currently running locally on a Windows/RTX 3060 Ti box** (the GPU/eval
+box referenced above is a local machine, not a shared cluster — DSMLP
+access was abandoned after repeated infra failures, see
+[EXPERIMENT_LOG.md](docs/EXPERIMENT_LOG.md)). That setup has its own venv
+location, path conventions, and three Windows-specific patches needed for
+the LIBERO simulator to work at all — see
+[docs/LOCAL_SETUP.md](docs/LOCAL_SETUP.md) before assuming the generic
+setup above applies as-is, and use `configs/local.yaml` (not
+`default.yaml`) for real-data work in that environment.
+
 ## Training (module by module, per the proposal timeline)
 
 Each stage has a `--smoke` flag that runs a tiny CPU pass end-to-end — use it

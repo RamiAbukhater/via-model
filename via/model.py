@@ -35,6 +35,7 @@ class EpisodeState:
     last_action: torch.Tensor
     lang_tokens: torch.Tensor
     lang_mask: torch.Tensor
+    min_sigma: torch.Tensor  # running min of mean belief sigma this episode
 
 
 class VIAModel(nn.Module):
@@ -75,19 +76,28 @@ class VIAModel(nn.Module):
             last_action=torch.zeros(B, C.action_dim, device=device),
             lang_tokens=lang_tokens.to(device),
             lang_mask=lang_mask.to(device),
+            min_sigma=torch.full((B,), float("inf"), device=device),
         )
 
     @torch.no_grad()
-    def act(self, frame: torch.Tensor, state: EpisodeState) -> tuple[torch.Tensor, EpisodeState, dict]:
-        """One control step. frame (B, 3, 224, 224) in [0,1] -> action (B, 7).
+    def act(
+        self, frame: torch.Tensor, proprio: torch.Tensor, state: EpisodeState
+    ) -> tuple[torch.Tensor, EpisodeState, dict]:
+        """One control step. frame (B, 3, 224, 224) in [0,1], proprio (B, proprio_dim)
+        (end-effector position + gripper state) -> action (B, 7).
 
         Returns (action, new_state, diagnostics).
         """
         patches = self.perception(frame.unsqueeze(1))[:, 0]        # (B, P, 768)
-        obs_embed = self.belief_net.encode_obs(patches)            # (B, D)
+        obs_embed = self.belief_net.encode_obs(patches, proprio)   # (B, D)
 
         belief = self.belief_net.step(obs_embed, state.belief.hidden)
         rssm, _ = self.world_model.posterior_step(state.rssm, state.last_action, obs_embed)
+        # Neutralized to a constant -- see AdaptiveGate's docstring
+        # (via/decision/decision.py) for why: the running min was found to
+        # extrapolate badly at live 300-step episode lengths after only ever
+        # training on 16-step clips.
+        min_sigma = torch.zeros_like(belief.sigma.mean(-1))
 
         # Goal re-inference: the belief conditions the goal, so as the scene
         # disambiguates, the goal distribution narrows.
@@ -95,17 +105,19 @@ class VIAModel(nn.Module):
         if goal is None or self._step_count % self.reinfer_goal_every == 0:
             goal = self.goal_net(state.lang_tokens, state.lang_mask, belief.mu)
 
-        out = self.decision.select_action(belief, rssm, goal.embedding, goal.entropy())
+        out = self.decision.select_action(belief, rssm, goal.embedding, goal.entropy(), min_sigma)
         action = out["action"]
         self._step_count += 1
 
         new_state = EpisodeState(
             belief=belief, rssm=rssm, goal=goal, last_action=action,
             lang_tokens=state.lang_tokens, lang_mask=state.lang_mask,
+            min_sigma=min_sigma,
         )
         diagnostics = {
             "belief_entropy": belief.entropy(),
             "belief_sigma_mean": belief.sigma.mean(-1),
+            "min_sigma": min_sigma,
             "goal_entropy": goal.entropy(),
             "goal_probs": goal.probs,
             "lambda": out["lambda"],

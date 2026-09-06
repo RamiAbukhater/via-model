@@ -70,17 +70,21 @@ def main() -> None:
             occluded = occluded.to(device).bool() if occluded is not None else None
             occ_p = cfg["belief"].get("occlude_p", 0.0)
             if occ_p > 0:
-                frames, occ_aug = occlude_clips(frames, occ_p)
+                occ_max_len = cfg["belief"].get("occlude_max_len", 4)
+                frames, occ_aug = occlude_clips(frames, occ_p, max_len=occ_max_len)
                 occ_aug = occ_aug.to(device)
                 occluded = occ_aug if occluded is None else (occluded | occ_aug)
+            proprio = batch["proprio"].to(device)
             patches = common.encode_frames(perception, frames)
-            losses = belief_net.loss(patches, occluded=occluded)
+            losses = belief_net.loss(patches, proprio, occluded=occluded)
             opt.zero_grad()
             losses["loss"].backward()
             torch.nn.utils.clip_grad_norm_(belief_net.parameters(), 10.0)
             opt.step()
             common.log_metrics(run, losses, step)
             step += 1
+            if step % 200 == 0:
+                common.save_checkpoint(belief_net, cfg, "belief")
             if args.smoke and step >= 3:
                 break
         common.save_checkpoint(belief_net, cfg, "belief")

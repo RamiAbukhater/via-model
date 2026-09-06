@@ -167,10 +167,15 @@ class RSSM(nn.Module):
 
     @torch.no_grad()
     def rollout_mse(
-        self, obs_embeds: torch.Tensor, actions: torch.Tensor, k: int = 5
+        self, obs_embeds: torch.Tensor, actions: torch.Tensor, k: int = 5, reduce: bool = True
     ) -> dict[str, torch.Tensor]:
         """k-step open-loop prediction error vs the 'persistence' naive baseline
-        (predict obs_{t+k} = obs_t). The Checkpoint-1 world-model metric."""
+        (predict obs_{t+k} = obs_t). The Checkpoint-1 world-model metric.
+
+        `reduce=False` returns per-clip (B,) errors instead of the batch
+        mean — needed for a win-rate check, since 07-23's investigation
+        found the batch mean can look like a win while the model actually
+        loses on most individual clips (see docs/EXPERIMENT_LOG.md)."""
         B, T = obs_embeds.shape[:2]
         if T < k + 1:
             raise ValueError(f"need at least {k + 1} steps, got {T}")
@@ -179,6 +184,8 @@ class RSSM(nn.Module):
         state, _ = self.posterior_step(state, zero_a, obs_embeds[:, 0])
         imagined = self.imagine(state, actions[:, :k])
         pred = self.decode(imagined[-1])
-        model_mse = F.mse_loss(pred, obs_embeds[:, k])
-        naive_mse = F.mse_loss(obs_embeds[:, 0], obs_embeds[:, k])
-        return {"model_mse": model_mse, "naive_mse": naive_mse}
+        per_clip_model = F.mse_loss(pred, obs_embeds[:, k], reduction="none").mean(dim=-1)
+        per_clip_naive = F.mse_loss(obs_embeds[:, 0], obs_embeds[:, k], reduction="none").mean(dim=-1)
+        if not reduce:
+            return {"model_mse": per_clip_model, "naive_mse": per_clip_naive}
+        return {"model_mse": per_clip_model.mean(), "naive_mse": per_clip_naive.mean()}

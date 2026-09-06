@@ -27,7 +27,8 @@ def test_full_pipeline_forward(perception, language):
     state = model.reset(["pick up the red block", "push the bowl"])
     for _ in range(STEPS):
         frame = torch.rand(B, 3, C.image_size, C.image_size)
-        action, state, diag = model.act(frame, state)
+        proprio = torch.randn(B, C.proprio_dim)
+        action, state, diag = model.act(frame, proprio, state)
         assert action.shape == (B, C.action_dim)
         assert torch.isfinite(action).all()
         assert diag["belief_entropy"].shape == (B,)
@@ -41,8 +42,9 @@ def test_belief_evolves_across_steps(perception, language):
     model = _model(perception, language)
     state = model.reset(["open the drawer"])
     frame = torch.rand(1, 3, C.image_size, C.image_size)
-    _, s1, _ = model.act(frame, state)
-    _, s2, _ = model.act(frame, s1)
+    proprio = torch.randn(1, C.proprio_dim)
+    _, s1, _ = model.act(frame, proprio, state)
+    _, s2, _ = model.act(frame, proprio, s1)
     assert not torch.allclose(s1.belief.mu, s2.belief.mu)
 
 

@@ -31,7 +31,7 @@ def test_utility_head_shape():
 def test_gate_range():
     gate = AdaptiveGate(lambda_max=2.0)
     net = BeliefStateNetwork()
-    lam = gate(_belief(net), torch.rand(B))
+    lam = gate(_belief(net), torch.rand(B), torch.rand(B))
     assert lam.shape == (B,)
     assert torch.all(lam >= 0) and torch.all(lam <= 2.0)
 
@@ -55,7 +55,8 @@ def test_expected_utility_shape():
 def test_select_action_contract():
     dm, rssm, belief_net = _module()
     out = dm.select_action(
-        _belief(belief_net), rssm.init_state(B), torch.randn(B, C.goal_embed_dim), torch.rand(B)
+        _belief(belief_net), rssm.init_state(B), torch.randn(B, C.goal_embed_dim),
+        torch.rand(B), torch.rand(B),
     )
     a = out["action"]
     assert a.shape == (B, C.action_dim)
@@ -64,8 +65,16 @@ def test_select_action_contract():
 
 
 def test_cem_finds_known_optimum():
-    """CEM should push the first action toward a planted optimum."""
-    planner = CEMPlanner(CEMConfig(population=64, elites=6, iterations=4))
+    """CEM should push the first action toward a planted optimum.
+
+    Explicit init_std=0.5, not the production default (tightened to 0.1
+    2026-08-22 for the seeded-from-action_prior use case, see
+    via/decision/decision.py's CEMConfig docstring) -- this test starts from
+    zero-mean with no seed, a different use case that needs real exploration
+    room to reach a target 0.8 away in a handful of iterations, independent
+    of whatever the production default happens to be tuned to.
+    """
+    planner = CEMPlanner(CEMConfig(population=64, elites=6, iterations=4, init_std=0.5))
     target = torch.full((C.action_dim,), 0.8)
 
     def score(cands):  # (B, N, H, A) -> (B, N): reward closeness to target at t=0

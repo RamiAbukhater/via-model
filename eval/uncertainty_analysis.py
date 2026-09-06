@@ -27,11 +27,23 @@ def libero_occlusion_clips(cfg: dict, n_clips: int):
     In-domain occlusion probe: the belief net trained on LIBERO frames, so
     the sigma comparison is between visible and blanked frames of the same
     distribution (a domain-matched version of the synthetic occlusion test).
-    Clips are drawn with a fixed held-out seed.
+
+    split="val" (via/data/libero.py, held out by demo): a fixed seed alone
+    isn't enough here — unlike synthetic data, LIBERO is a finite pool, and
+    training draws from the same pool by default, so a "held-out seed" was
+    previously just a different random sample of clips the model had almost
+    certainly already seen (see docs/EXPERIMENT_LOG.md 08-13). The split
+    keeps eval demos entirely out of the training set.
     """
     from via.data.libero import LiberoTrajectoryDataset
 
-    ds = LiberoTrajectoryDataset(cfg["data"]["libero_dir"], clip_len=cfg["data"]["clip_len"])
+    ds = LiberoTrajectoryDataset(
+        cfg["data"]["libero_dir"],
+        clip_len=cfg["data"]["clip_len"],
+        suite_filter=cfg["data"].get("suite"),
+        object_state_dir=cfg["data"].get("object_state_dir"),
+        split="val",
+    )
     idx = torch.randperm(len(ds), generator=torch.Generator().manual_seed(999))[:n_clips]
     for i in idx.tolist():
         item = ds[i]
@@ -41,7 +53,11 @@ def libero_occlusion_clips(cfg: dict, n_clips: int):
         occluded[start : min(T, start + 3)] = True
         frames = item["frames"].clone()
         frames[occluded] = 0.0
-        yield {"frames": frames.unsqueeze(0), "occluded": occluded.unsqueeze(0)}
+        yield {
+            "frames": frames.unsqueeze(0),
+            "occluded": occluded.unsqueeze(0),
+            "proprio": item["proprio"].unsqueeze(0),  # unaffected by visual occlusion
+        }
 
 
 @torch.no_grad()
@@ -49,8 +65,9 @@ def sigma_traces(perception, belief_net, loader, device) -> list[dict]:
     rows = []
     for clip_id, batch in enumerate(loader):
         frames = batch["frames"].to(device)
+        proprio = batch["proprio"].to(device)
         patches = common.encode_frames(perception, frames)
-        beliefs = belief_net.rollout(patches)
+        beliefs = belief_net.rollout(patches, proprio)
         occluded = batch.get("occluded")
         for t, b in enumerate(beliefs):
             rows.append({
@@ -100,7 +117,31 @@ def main() -> None:
     vis = [r["sigma_mean"] for r in rows if not r["occluded"]]
     if occ and vis:
         ratio = (sum(occ) / len(occ)) / (sum(vis) / len(vis))
-        print(f"sigma occluded/visible ratio: {ratio:.3f} (want > 1.0 after training)")
+        print(f"sigma occluded/visible ratio (pooled): {ratio:.3f} (want > 1.0 after training)")
+
+    # Per-clip comparison, not just pooled: pooling occluded/visible sigma
+    # across all clips lets between-clip differences in baseline sigma level
+    # (e.g. some tasks/scenes are just busier) dilute a real within-clip
+    # effect — found 08-13 (see docs/EXPERIMENT_LOG.md), where the pooled
+    # ratio read as a thin 1.02 but the per-clip win-rate was a much
+    # stronger, statistically robust 77%. Compare each clip's occluded-mean
+    # sigma against its own visible-mean baseline instead.
+    by_clip: dict[int, list[tuple[float, bool]]] = {}
+    for r in rows:
+        by_clip.setdefault(r["clip"], []).append((r["sigma_mean"], r["occluded"]))
+    diffs = []
+    for pts in by_clip.values():
+        c_occ = [s for s, o in pts if o]
+        c_vis = [s for s, o in pts if not o]
+        if c_occ and c_vis:
+            diffs.append(sum(c_occ) / len(c_occ) - sum(c_vis) / len(c_vis))
+    if diffs:
+        wins = sum(1 for d in diffs if d > 0)
+        print(
+            f"sigma rises on occlusion, per-clip: {wins}/{len(diffs)} = "
+            f"{wins / len(diffs):.3f} win rate (want > 0.5; this is the more "
+            f"trustworthy number, see docs/EXPERIMENT_LOG.md 08-13)"
+        )
     print(f"wrote {csv_path}")
 
     try:

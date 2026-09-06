@@ -1,0 +1,112 @@
+# Local Windows box (RTX 3060 Ti, 8GB VRAM): real SigLIP encoder, real LIBERO
+# data, everything large kept on D: (C: has ~12GB free, not enough headroom).
+# Continues the real-data training that stalled on UCSD DSMLP (see
+# docs/EXPERIMENT_LOG.md, 2026-07-14 "Run 3" / run 3b, outcome unconfirmed).
+
+seed: 7
+
+encoders:
+  vision: google/siglip-base-patch16-224
+  # Not needed for belief/world_model/decision (vision-only stages). Goal
+  # inference DOES now use this for real-data fine-tuning (08-13, see
+  # EXPERIMENT_LOG.md) — train/train_goal.py's libero path classifies among
+  # libero_spatial's 10 fixed tasks, each with one constant instruction
+  # string per task, so the stub's hashed-but-consistent embeddings are
+  # learnable (same input always maps to the same vector) even though
+  # they're not semantically meaningful. Swap to
+  # microsoft/Phi-3-mini-4k-instruct if/when generalizing to genuinely novel
+  # instructions/vocabulary the model has never seen in any form matters
+  # (out of scope while only libero_spatial's 10 tasks exist locally).
+  language: stub
+
+data:
+  source: libero
+  synthetic_size: 512
+  libero_dir: D:/via-data/libero
+  # Companion HDF5s (per-timestep target-object-relative position, see
+  # scripts/extract_object_state.py) -- generated once, offline, from
+  # libero_dir's demo files via direct physics-state replay.
+  object_state_dir: D:/via-data/libero_object_state
+  # Synthetic demos from trajectory retargeting (see
+  # scripts/generate_augmented_demos.py), one companion HDF5 per real task
+  # file (matched by filename/instruction, not by directory listing order --
+  # see docs/EXPERIMENT_LOG.md 2026-08-24), merged under the same task_id.
+  augment_dir: D:/via-data/libero_augmented
+  suite: libero_spatial
+  clip_len: 16
+  # 0 on Windows: LiberoTrajectoryDataset opens an h5py.File per __getitem__
+  # (cheap, no persistent handle to pickle), and avoids spawn-based
+  # DataLoader worker overhead/edge cases for the first real run.
+  num_workers: 0
+
+belief:
+  lr: 3.0e-4
+  batch_size: 16
+  epochs: 20
+  kl_weight: 1.0e-2
+  # Raised from 0.5 and widened from max_len 4 (2026-08-12): with the
+  # obs_embed scale bug fixed (see EXPERIMENT_LOG.md), training is healthy
+  # but sigma occluded/visible ratio still came in at 0.966 (want > 1.0) —
+  # real LIBERO scenes have far more natural motion/detail than the
+  # synthetic clips this recipe was tuned on, so a 3-frame blank in 16 may
+  # be too weak a signal to compete for the network's attention. Trying a
+  # stronger, more frequent occlusion signal before considering other
+  # explanations (more epochs, eval noise).
+  occlude_p: 0.75
+  occlude_max_len: 7
+  var_weight: 100.0
+
+world_model:
+  lr: 3.0e-4
+  batch_size: 16
+  # Cut from 20 -> 2 on 2026-09-01 (see docs/EXPERIMENT_LOG.md): at the
+  # current dataset size (5000 demos, ~3.3x the 1500 this ratio was tuned
+  # for), 20 epochs would take multiple more days -- infeasible given a
+  # Sept 4 deadline discovered mid-run on the belief stage. 2 epochs over
+  # 5000 demos is still ~1.5x the sample-exposure of 20 epochs over 500
+  # demos (this project's original validated scale), not a blind cut --
+  # a deliberate, documented deadline tradeoff, not an unconsidered one.
+  epochs: 2
+  free_bits: 1.0
+
+goal:
+  lr: 3.0e-4
+  batch_size: 64        # synthetic pretraining only (no vision encoder cost)
+  epochs: 10             # synthetic pretraining only
+  dataset_size: 4096
+  # Real-data fine-tune (train/train_goal.py, data.source: libero): each
+  # step now costs a real SigLIP forward pass like belief/world_model, and
+  # the task itself is much easier (10-way classification among fixed
+  # instructions, warm-started from the synthetic checkpoint) — smaller
+  # batch/fewer epochs than the synthetic numbers above, sized like
+  # belief/world_model's compute-bound batch rather than synthetic's cheap
+  # one. Held-out check every 50 steps decides if this is even enough.
+  libero_batch_size: 16
+  # Cut 5 -> 2 on 2026-09-01 (see docs/EXPERIMENT_LOG.md, same deadline
+  # reasoning as world_model above). Lower risk here than for world_model:
+  # this task has historically hit ~95-100% held-out accuracy well before
+  # even 1 full epoch in every prior run at this project's original scale,
+  # and best-checkpoint selection (already in this script) picks the
+  # highest-held-out-accuracy checkpoint regardless of which epoch it
+  # lands in, not just whatever the last one happens to be.
+  libero_epochs: 2
+
+decision:
+  lr: 3.0e-4
+  batch_size: 16
+  epochs: 10
+  lambda_max: 2.0
+  bc_feature_noise: 0.15
+
+# Alternative to CEMPlanner + ActionPrior -- see via/decision/chunking.py.
+chunking:
+  lr: 3.0e-4
+  batch_size: 16
+  epochs: 10
+  chunk_size: 8
+
+checkpoints:
+  dir: D:/via-data/checkpoints
+
+wandb:
+  project: via-model

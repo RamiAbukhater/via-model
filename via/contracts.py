@@ -26,6 +26,29 @@ class Contracts:
     belief_dim: int = 256           # latent world state; belief is N(mu, diag(sigma^2))
     belief_hidden_dim: int = 512    # GRU hidden size
 
+    # ---- Proprioception (fused into obs_embed alongside vision; see
+    # docs/EXPERIMENT_LOG.md 2026-08-16 -- the pooled visual embedding alone
+    # has no dedicated channel for precise end-effector position or gripper
+    # open/close state, both of which live cheaply and precisely in
+    # robosuite/LIBERO's own observations) ----
+    # end-effector position (3) + gripper finger joint positions (2).
+    # Orientation deliberately left out of v1: the offline demo HDF5s store
+    # a 3-dim `ee_ori` of unconfirmed convention while the live sim exposes
+    # a 4-dim quaternion (`robot0_eef_quat`) -- reconciling those risks a
+    # silent train/inference mismatch, exactly the failure mode this project
+    # has already been bitten by twice (obs_embed scale, eu/ig scale).
+    #
+    # Extended 2026-08-21 with target-object-relative position (3): robot-only
+    # proprioception measurably recovered a regression but didn't move
+    # closed-loop success on its own (see EXPERIMENT_LOG.md) -- it tells the
+    # model where its own gripper is, not where the target object is, which
+    # a coarse pooled visual embedding struggles to localize precisely.
+    # Sourced from `<object>_to_robot0_eef_pos` (live sim, via
+    # `obj_of_interest`) and, offline, from a one-time physics-state-replay
+    # preprocessing pass over the demo files (scripts/extract_object_state.py)
+    # since the raw demo HDF5s don't label object identity/position directly.
+    proprio_dim: int = 8
+
     # ---- Language / goal inference ----
     lang_dim: int = 3072            # Phi-3-mini-4k-instruct hidden size
     goal_slots: int = 32            # K candidate goal prototypes

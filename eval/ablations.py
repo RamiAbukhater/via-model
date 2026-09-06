@@ -27,9 +27,13 @@ def apply_variant(model, variant: str):
     if variant == "full":
         return model
     if variant == "lambda0":
-        gate = model.decision.gate
-        model.decision.gate = lambda belief, goal_ent: torch.zeros_like(
-            gate(belief, goal_ent)
+        # `gate` is a registered nn.Module submodule of DecisionModule, so
+        # replacing the attribute outright is rejected by nn.Module's
+        # __setattr__ (found running this variant for the first time --
+        # ablations.py had never actually been executed past "full").
+        # Monkey-patch .forward instead, same pattern as point_goal/no_belief.
+        model.decision.gate.forward = lambda belief, goal_ent, min_sigma: torch.zeros(
+            belief.mu.shape[0], device=belief.mu.device
         )
     elif variant == "point_goal":
         inner = model.goal_net.forward

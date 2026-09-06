@@ -108,10 +108,18 @@ class SyntheticTrajectoryDataset(Dataset):
                 x, y = int(pos[0]), int(pos[1])
                 frames[t, :, y : y + sq, x : x + sq] = color.view(3, 1, 1)
 
+        reward = torch.zeros(T)
+        reward[-1] = 1.0  # sparse terminal reward, matching LiberoTrajectoryDataset's convention
+
         return {
             "frames": frames,                                   # (T, 3, 224, 224)
             "actions": actions,                                 # (T, 7)
             "occluded": occluded,                               # (T,)
             "progress": torch.linspace(0.0, 1.0, T),            # (T,)
+            "reward": reward,                                   # (T,)
+            # No real gripper/end-effector in this synthetic task -- zeros,
+            # not a fabricated signal, so smoke/CPU runs exercise the same
+            # code path real data uses without pretending to be meaningful.
+            "proprio": torch.zeros(T, C.proprio_dim),           # (T, 5)
             "instruction": "push the square to the corner",
         }

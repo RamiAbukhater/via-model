@@ -45,11 +45,12 @@ def main() -> None:
         for batch in loader:
             frames = batch["frames"].to(device)
             actions = batch["actions"].to(device)
+            proprio = batch["proprio"].to(device)
             with torch.no_grad():
                 patches = common.encode_frames(perception, frames)
                 B, T = patches.shape[:2]
                 obs_embeds = torch.stack(
-                    [belief_net.encode_obs(patches[:, t]) for t in range(T)], dim=1
+                    [belief_net.encode_obs(patches[:, t], proprio[:, t]) for t in range(T)], dim=1
                 )
             losses = rssm.loss(obs_embeds, actions[:, :-1])
             opt.zero_grad()
@@ -62,6 +63,17 @@ def main() -> None:
                 roll = rssm.rollout_mse(obs_embeds, actions[:, :-1], k=5)
                 metrics["rollout5_model_mse"] = roll["model_mse"]
                 metrics["rollout5_naive_mse"] = roll["naive_mse"]
+            # In-training-batch rollout5 (above) is not trustworthy alone —
+            # 07-23 found it can look like a win on the batch mean while the
+            # model loses on most individual clips. This periodic check runs
+            # on genuinely held-out data (LiberoTrajectoryDataset split="val")
+            # and reports win-rate, so a bad run can be caught well before
+            # all `epochs` complete instead of only at the very end.
+            if not args.smoke and step % 500 == 0:
+                rssm.eval()
+                holdout = common.world_model_holdout_check(cfg, perception, belief_net, rssm, device)
+                rssm.train()
+                common.log_metrics(run, holdout, step)
             common.log_metrics(run, metrics, step)
             step += 1
             if args.smoke and step >= 3:

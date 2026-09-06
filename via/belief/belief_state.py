@@ -8,10 +8,16 @@ NLL on that prediction — when the scene is occluded or ambiguous the network
 can only lower its loss by admitting uncertainty, so sigma rises.
 
 Interfaces:
-    encode_obs(patches)          (B, P, 768) -> obs embed (B, 256)
+    encode_obs(patches, proprio) (B, P, 768), (B, proprio_dim) -> obs embed (B, 256)
     step(obs_embed, hidden)      one filtering update -> BeliefState
-    rollout(patches_seq)         (B, T, P, 768) -> beliefs over time
-    loss(patches_seq)            self-supervised training objective
+    rollout(patches_seq, proprio_seq)  (B, T, P, 768), (B, T, proprio_dim) -> beliefs over time
+    loss(patches_seq, proprio_seq)     self-supervised training objective
+
+`encode_obs` fuses the pooled visual embedding with a small proprioceptive
+vector (end-effector position + gripper state -- see via/contracts.py) before
+the final projection, so obs_embed_dim (and everything downstream: the RSSM,
+the utility head) is unaffected -- only encode_obs's callers need to also
+supply proprio.
 """
 
 from dataclasses import dataclass
@@ -59,6 +65,7 @@ class BeliefStateNetwork(nn.Module):
         obs_embed_dim: int = C.obs_embed_dim,
         belief_dim: int = C.belief_dim,
         hidden_dim: int = C.belief_hidden_dim,
+        proprio_dim: int = C.proprio_dim,
         num_queries: int = 4,
         kl_weight: float = 1e-3,
         var_weight: float = 1.0,
@@ -74,6 +81,25 @@ class BeliefStateNetwork(nn.Module):
         self.patch_proj = nn.Linear(patch_dim, obs_embed_dim)
         self.pool_attn = nn.MultiheadAttention(obs_embed_dim, num_heads=4, batch_first=True)
         self.pool_out = nn.Linear(num_queries * obs_embed_dim, obs_embed_dim)
+
+        # Proprioception fusion: end-effector position + gripper state fed
+        # in alongside vision (see via/contracts.py's proprio_dim docstring).
+        # Normalized first since raw ee_pos (meters, robot-frame) and
+        # gripper finger joint positions live on different natural scales --
+        # exactly the kind of unnormalized-scale trap that bit obs_embed
+        # (see obs_norm below) and the eu/ig CEM objective terms.
+        self.proprio_norm = nn.LayerNorm(proprio_dim)
+        self.proprio_mlp = nn.Sequential(nn.Linear(proprio_dim, 64), nn.GELU())
+        self.fuse = nn.Linear(obs_embed_dim + 64, obs_embed_dim)
+        # obs_embed's absolute scale is otherwise unconstrained: var_loss only
+        # pushes per-clip temporal std up (never down), so nothing stops it
+        # from growing far past what next_obs_logvar's clamp (var <= e^4 ~=
+        # 54.6) can represent as predictive variance. Real SigLIP patches
+        # (std ~2.3) vs StubPerception (std ~0.24, scaled by *0.02 at init)
+        # drive this to very different scales, so a fixed clamp tuned against
+        # one silently breaks on the other. LayerNorm bounds obs_embed to a
+        # consistent scale regardless of which perception encoder feeds it.
+        self.obs_norm = nn.LayerNorm(obs_embed_dim)
 
         self.gru = nn.GRUCell(obs_embed_dim, hidden_dim)
         self.mu_head = nn.Linear(hidden_dim, belief_dim)
@@ -91,14 +117,16 @@ class BeliefStateNetwork(nn.Module):
         p = next(self.parameters())
         return torch.zeros(batch, self.hidden_dim, device=device or p.device, dtype=p.dtype)
 
-    def encode_obs(self, patches: torch.Tensor) -> torch.Tensor:
-        """(B, P, patch_dim) -> (B, obs_embed_dim)."""
+    def encode_obs(self, patches: torch.Tensor, proprio: torch.Tensor) -> torch.Tensor:
+        """(B, P, patch_dim), (B, proprio_dim) -> (B, obs_embed_dim)."""
         assert_shape(patches, (-1, C.patch_count, C.patch_dim), "patches")
         B = patches.shape[0]
         kv = self.patch_proj(patches)
         q = self.queries.unsqueeze(0).expand(B, -1, -1)
         pooled, _ = self.pool_attn(q, kv, kv)               # (B, Q, D)
-        return self.pool_out(pooled.flatten(1))             # (B, D)
+        vis = self.pool_out(pooled.flatten(1))               # (B, D)
+        prop = self.proprio_mlp(self.proprio_norm(proprio))  # (B, 64)
+        return self.obs_norm(self.fuse(torch.cat([vis, prop], dim=-1)))  # (B, D)
 
     def step(self, obs_embed: torch.Tensor, hidden: torch.Tensor) -> BeliefState:
         """One filtering update from a pooled observation embedding."""
@@ -107,13 +135,13 @@ class BeliefStateNetwork(nn.Module):
         logvar = self.logvar_head(h).clamp(_LOGVAR_MIN, _LOGVAR_MAX)
         return BeliefState(mu=mu, logvar=logvar, hidden=h)
 
-    def rollout(self, patches_seq: torch.Tensor) -> list[BeliefState]:
-        """(B, T, P, patch_dim) -> list of T BeliefStates."""
+    def rollout(self, patches_seq: torch.Tensor, proprio_seq: torch.Tensor) -> list[BeliefState]:
+        """(B, T, P, patch_dim), (B, T, proprio_dim) -> list of T BeliefStates."""
         B, T = patches_seq.shape[:2]
         h = self.init_hidden(B, patches_seq.device)
         beliefs = []
         for t in range(T):
-            b = self.step(self.encode_obs(patches_seq[:, t]), h)
+            b = self.step(self.encode_obs(patches_seq[:, t], proprio_seq[:, t]), h)
             beliefs.append(b)
             h = b.hidden
         return beliefs
@@ -121,7 +149,10 @@ class BeliefStateNetwork(nn.Module):
     # ---- training ----
 
     def loss(
-        self, patches_seq: torch.Tensor, occluded: Optional[torch.Tensor] = None
+        self,
+        patches_seq: torch.Tensor,
+        proprio_seq: torch.Tensor,
+        occluded: Optional[torch.Tensor] = None,
     ) -> dict[str, torch.Tensor]:
         """Self-supervised next-observation prediction with NLL-calibrated variance.
 
@@ -142,13 +173,13 @@ class BeliefStateNetwork(nn.Module):
         B, T = patches_seq.shape[:2]
         if T < 2:
             raise ValueError("belief loss needs at least 2 timesteps")
-        beliefs = self.rollout(patches_seq)
+        beliefs = self.rollout(patches_seq, proprio_seq)
         with torch.no_grad():
             targets = torch.stack(
-                [self.encode_obs(patches_seq[:, t]) for t in range(1, T)], dim=1
+                [self.encode_obs(patches_seq[:, t], proprio_seq[:, t]) for t in range(1, T)], dim=1
             )  # (B, T-1, D)
         obs_embeds = torch.stack(
-            [self.encode_obs(patches_seq[:, t]) for t in range(T)], dim=1
+            [self.encode_obs(patches_seq[:, t], proprio_seq[:, t]) for t in range(T)], dim=1
         )  # (B, T, D), WITH grad — feeds the anti-collapse term only
 
         nll_terms, kl_terms = [], []

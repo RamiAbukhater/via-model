@@ -47,7 +47,8 @@ def grounding_belief_mu(perception, belief_net, cfg, device) -> torch.Tensor:
     belief-conditions-goal flow in via/model.py's act()."""
     clip = SyntheticTrajectoryDataset(size=1, clip_len=cfg["data"]["clip_len"], seed=999)[0]
     patches = common.encode_frames(perception, clip["frames"].unsqueeze(0).to(device))
-    beliefs = belief_net.rollout(patches)
+    proprio = clip["proprio"].unsqueeze(0).to(device)
+    beliefs = belief_net.rollout(patches, proprio)
     return beliefs[-1].mu
 
 

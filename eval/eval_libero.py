@@ -16,7 +16,7 @@ import torch
 
 from train import common
 from via.belief import BeliefStateNetwork
-from via.decision import AdaptiveGate, DecisionModule, UtilityHead
+from via.decision import ActionPrior, AdaptiveGate, DecisionModule, UtilityHead
 from via.goal import GoalInferenceRSA
 from via.model import VIAModel
 from via.world_model import RSSM
@@ -28,13 +28,15 @@ def build_model(cfg: dict, device: str, smoke: bool = False) -> VIAModel:
     goal_net = GoalInferenceRSA()
     utility = UtilityHead()
     gate = AdaptiveGate(lambda_max=cfg["decision"]["lambda_max"])
+    action_prior = ActionPrior()
     if not smoke:
         common.load_checkpoint(belief_net, cfg, "belief", device)
         common.load_checkpoint(rssm, cfg, "world_model", device)
         common.load_checkpoint(goal_net, cfg, "goal", device)
         common.load_checkpoint(utility, cfg, "utility", device)
         common.load_checkpoint(gate, cfg, "gate", device)
-    decision = DecisionModule(rssm, belief_net, utility, gate)
+        common.load_checkpoint(action_prior, cfg, "action_prior", device)
+    decision = DecisionModule(rssm, belief_net, utility, gate, action_prior=action_prior)
     model = VIAModel(
         perception=common.build_perception(cfg, smoke),
         language=common.build_language(cfg, smoke),
@@ -55,7 +57,7 @@ def main() -> None:
 
     from via.data.libero import LiberoEnvRunner
 
-    model = build_model(cfg, args.device)
+    model = build_model(cfg, args.device, args.smoke)
     runner = LiberoEnvRunner(suite=args.suite)
 
     results = []
