@@ -5,55 +5,62 @@ narrative of *why* things are the way they are, see
 [EXPERIMENT_LOG.md](EXPERIMENT_LOG.md) — this file is just the "how do I get
 back to a working state" checklist.
 
-## Current status (as of 2026-08-23)
+## Current status (as of 2026-09-21 — see docs/HANDOFF.md first)
 
-All 4 training stages (belief, world_model, goal, decision) trained and
-validated on real `libero_spatial` data. State representation now includes
-proprioception (end-effector position + gripper state) *and*
-target-object-relative position (`proprio_dim=8` — via
-`scripts/extract_object_state.py`'s offline physics-replay preprocessing,
-companion HDF5s in `D:/via-data/libero_object_state/`). UtilityHead trains
-via TD(0) against LIBERO's own sparse terminal reward, not the original
-`progress = t/T` regression target. CEM's default search radius
-(`init_std`) is tightened to 0.1 (from 0.5) — found to matter a lot, see
-EXPERIMENT_LOG.md's 2026-08-21/23 entry for the full story and why each
-piece is there. Checkpoints in `D:\via-data\checkpoints\` (`belief.pt`,
-`world_model.pt`, `goal.pt`, `utility.pt`, `gate.pt`, `action_prior.pt`;
-`goal_synthetic_only.pt` is a backup from a much earlier fine-tune,
-effectively stale now). **Pre-2026-08-21 checkpoints no longer exist** —
-overwritten in place across multiple retrains with no backup taken first;
-there's no clean rollback to any earlier system state without retraining
-from scratch.
+**Start here, not in this file:** [`docs/HANDOFF.md`](HANDOFF.md) is the
+up-to-date entry point for a new session — project state, the validated
+paper result, and the critical checkpoint-mismatch caveat below are all
+explained there in one place. This section is being kept as a secondary
+summary but may lag; HANDOFF.md is the source of truth for "what's the
+state right now."
 
-Live LIBERO simulator (robosuite/MuJoCo) working locally. Closed-loop
-`eval/eval_libero.py` / `eval/ablations.py` full-scale (30 episodes/variant)
-runs at the current best-known configuration: still 0/30 across every
-variant, but gripper-to-target end-of-episode distance is roughly halved
-versus the original pre-Stage-2 baseline (~0.5-0.6 -> ~0.3-0.4, noisy
-across runs) via three independently-verified fixes (object-relative
-state, TD value target, tightened CEM search). Diminishing returns from
-further configuration tuning were confirmed directly (bigger ActionPrior
-capacity made things *worse* — data-scarcity overfitting, not undertrained)
-and no more real demo data exists to download for this suite (50/task is
-the complete official LIBERO-v1 release, confirmed via the dataset's own
-metadata). Remaining paths are qualitatively bigger investments (more
-data, or a different policy architecture class) — see EXPERIMENT_LOG.md's
-closing summary.
+All 4 original training stages (belief, world_model, goal, decision/CEM)
+plus a newer 5th (`chunking` — `via/decision/chunking.py`, an action-chunking
+policy) have been trained on real `libero_spatial` data at various points.
+State representation includes proprioception (end-effector position +
+gripper state) *and* target-object-relative position (`proprio_dim=8`).
+UtilityHead trains via TD(0) against LIBERO's own sparse terminal reward.
+Demo data was expanded via scripted trajectory retargeting/augmentation
+(`scripts/generate_augmented_demos.py`) from 500 to several thousand demos.
 
-**GPU crash pattern, separate issue:** seven "GPU is lost" crashes total
-across the 2026-08-18/23 sessions, each needing a full reboot. Multiple
-confirmed at a freshly-verified 130W cap; the only fully clean training
-completions have been at 100W. See `[[project-via-model-hardware]]`
-memory — 100W is the current working assumption, not a proven-safe
-conclusion. User's explicit direction after the pattern repeated: keep
-training at 100W and treat it as tolerable rather than pausing to
-physically investigate the cable further.
+**The project's one validated positive result:** the action-chunking
+policy hit a reproducible (bit-for-bit, two independent runs) **10%
+closed-loop success rate (3/30)** on `libero_spatial`, vs. ~1.7% pooled for
+the tuned CEM+MLP pipeline — this is what's reported in the paper
+(`documents/paper/via_sdutc_paper.tex`, outside this repo, not under git).
+
+**Critical caveat — checkpoints on disk right now do NOT reproduce that
+10%.** A later 4500-demo full-cascade retrain (2026-09-01/03) partially
+overwrote `belief.pt` before being killed under deadline pressure, and the
+recovery retrain built on top of it verified at 0/30, not 10%. See
+`docs/EXPERIMENT_LOG.md`'s **2026-09-01/03** entry for the full incident,
+and `docs/HANDOFF.md` for exactly which checkpoints are stale/mismatched
+and what to do about it before trusting any eval run. Short version:
+`utility.pt`/`gate.pt`/`action_prior.pt` (CEM pipeline) are stale
+(2026-08-26, pre-crisis); `belief.pt`/`world_model.pt`/`goal.pt`/
+`chunking_policy.pt` are mutually consistent but only verified at 0/30.
+
+Live LIBERO simulator (robosuite/MuJoCo) working locally throughout.
+Diminishing returns from CEM/ActionPrior tuning alone were confirmed
+directly (bigger ActionPrior capacity made things *worse* — data-scarcity
+overfitting) before the pivot to action-chunking, which is what actually
+moved the needle. No more real demo data exists to download for this
+suite (50/task is the complete official LIBERO-v1 release).
+
+**GPU crash pattern, separate issue:** multiple "GPU is lost" crashes
+across the project, root-caused to a daisy-chained PCIe power cable (see
+`[[project-via-model-hardware]]` memory). **100W is the confirmed-reliable
+power cap** (130W crashed repeatedly; 100W has run cleanly for the large
+majority of this project's later training). A replacement PCIe cable was
+obtained but, as of the last confirmed state, **not yet installed** — the
+100W-cap routine below should be treated as still necessary until the
+user explicitly confirms otherwise.
 
 **Before doing anything else in a new session: check `git status` in
-`via-model/`.** As of this writing there are uncommitted changes covering
-essentially this entire session's work (see bottom of this file) — confirm
-whether they've since been committed before assuming the working tree
-matches git history.
+`via-model/`.** The repo was clean as of the last commit `4c91b13`
+("Real-data closed-loop pipeline: 0/100 -> 10% via proprioception, TD(0)
+value learning, CEM tuning, data augmentation, and action chunking"),
+pushed to `origin/main`. Confirm nothing has drifted since.
 
 ## Python environment
 
@@ -141,50 +148,38 @@ EXPERIMENT_LOG.md's 08-14 entry if anything related breaks in a new way.
 
 ## Hardware — GPU power cap and sleep (safety-relevant, please read)
 
-The PC crashed twice early in this project under sustained GPU load,
+The PC crashed multiple times across this project under sustained GPU load,
 root-caused to a daisy-chained PCIe power cable (see EXPERIMENT_LOG.md's
 08-11 entries for the full diagnosis with a hardware-troubleshooting AI).
-Two mitigations are in place **but the power cap does not survive a reboot
-or driver reset** — check and reapply if training crashes mysteriously
-again or if the PC has been restarted:
+130W was tried first and crashed repeatedly; **100W is the confirmed-reliable
+cap**. This mitigation is in place **but does not survive a reboot or driver
+reset** — check and reapply if training crashes mysteriously again or if the
+PC has been restarted:
 
 ```powershell
-# Check current cap (should read 130.00 W if still applied):
+# Check current cap (should read 100.00 W if still applied):
 nvidia-smi --query-gpu=power.limit --format=csv
 
 # Reapply if it's back to 200W (needs an elevated/Administrator PowerShell):
-nvidia-smi -pl 130
+nvidia-smi -pl 100
 ```
 
 Sleep-on-AC-power is disabled (`powercfg /change standby-timeout-ac 0`) —
 this setting *does* persist across reboots, shouldn't need reapplying.
 
-**Status of the actual fix:** a replacement PCIe power cable was ordered to
-stop daisy-chaining two connectors off one wire run. Confirm with the user
-whether it's arrived/been installed — if so, the 130W cap is likely safe to
+**Status of the actual fix:** a replacement PCIe power cable was obtained to
+stop daisy-chaining two connectors off one wire run, but as of the last
+confirmed state (user deferred the physical install: "I won't plug things in
+right now, maybe later") it had **not** been installed. Confirm with the
+user whether it's since gone in — if so, the 100W cap is likely safe to
 remove (`nvidia-smi -pl 200` from an elevated terminal) and training should
 run at full speed again; if not, keep the cap and sleep-disable in place.
 
-## Uncommitted work (as of 2026-08-15/16 — check `git status` to see if this is still true)
+## Uncommitted work
 
-The following were modified/added this session and were **not yet
-committed** when this doc was written:
-
-```
-modified: docs/EXPERIMENT_LOG.md, eval/eval_libero.py, eval/uncertainty_analysis.py,
-          train/common.py, train/train_belief.py, train/train_decision.py,
-          train/train_goal.py, train/train_world_model.py,
-          via/belief/belief_state.py, via/data/libero.py,
-          via/decision/__init__.py, via/decision/decision.py,
-          via/world_model/rssm.py
-untracked: configs/local.yaml
-```
-
-This covers: the `obs_embed` LayerNorm fix, the train/val split in
-`LiberoTrajectoryDataset`, all the held-out-check utilities in
-`train/common.py`, the real-data goal fine-tuning path, `ActionPrior` +
-score normalization + counterfactual utility training in the decision
-module, and the `eval_libero.py --smoke` bug fix. If starting a new session
-and these still show as uncommitted, that's real, valuable work sitting
-only in the working tree — worth committing before doing anything that
-could disturb it.
+As of 2026-09-03 (commit `4c91b13`), everything was committed and pushed
+to `origin/main` — including the action-chunking policy, the TD(0) utility
+rewrite, data augmentation scripts, and all docs through that date. This
+section (previously listing 2026-08-15/16 stragglers) is stale and kept
+only as a reminder of the habit: **run `git status` in `via-model/` at the
+start of a new session** rather than trusting this file's last-known state.

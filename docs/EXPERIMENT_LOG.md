@@ -1425,3 +1425,98 @@ the cleanest confirmation of any result in this investigation. Proceeding
 to the full-cascade retrain on the 4500-demo set.
 
 ---
+
+## 2026-09-01/03 — Full-cascade retrain on 4500 demos: a real checkpoint
+loss, a recovery cascade that did NOT reproduce 10%, and where this
+actually leaves the project
+
+**What was attempted:** retrain belief -> world_model -> goal on the full
+4500-demo set (up from the 1500 the validated 10% result above used), for
+full internal consistency with the already-larger dataset the chunking
+policy itself had been trained on, hoping data volume and the chunking
+architecture would compound further together.
+
+**What went wrong:** belief training at 4500 demos ran for 48 consecutive
+hours and had only reached ~71% of its expected step count (a Sept 4 paper
+deadline was 3 days out at the point this was noticed) -- not a bug, just
+genuinely proportionally slower at 3x the data, and the total time this
+implied (multiple more days once world_model/goal/chunking were added on
+top) was never checked against the deadline before the run was launched.
+That is a real process failure worth naming plainly: a training job should
+never be launched at a new data/epoch scale without first computing
+projected wall-clock against whatever deadline is live, and this run
+wasn't.
+
+Killing the run left `belief.pt` **partially overwritten in place** (the
+script checkpoints periodically during training) -- the *exact* belief
+checkpoint the validated 10% result depended on no longer exists anywhere
+and cannot be regenerated bit-for-bit; retraining is not reproducible
+enough (different RNG draws, non-deterministic CUDA ops) to recreate it
+even from the identical dataset and seed. Confirmed directly: re-running
+`eval/chunking_eval.py` with this new belief.pt paired with the
+old-belief-trained `world_model.pt`/`goal.pt`/`chunking_policy.pt` dropped
+closed-loop success to 0/30 -- the mismatch is real, not hypothetical
+(the same lesson as every "richer/bigger without also more robust"
+regression earlier in this document, now via a version-mismatch route
+rather than a training-choice route).
+
+**Recovery attempted, under the remaining ~1-day time budget:** rather
+than lose more time, kept the new (partially-trained) `belief.pt` as the
+new baseline and retrained `world_model` -> `goal` -> `chunking_policy` on
+top of it for consistency, with **epoch counts deliberately cut** to fit
+the remaining time (`world_model` 20->2 epochs, `goal`'s real-data
+fine-tune 5->2 epochs -- both edits are still in `configs/local.yaml` with
+inline comments explaining the cut). `world_model`'s held-out rollout
+win-rate came out markedly weaker than the 1500-demo run (high-motion
+31-50% vs. the earlier 78-91%) -- a real, expected quality cost of the
+epoch cut, though chunking only uses the world model for state filtering,
+not the forward-rollout planning CEM depends on, so the practical impact
+was unclear going in. `goal` still reached 98-100% held-out accuracy
+(this task converges fast enough that 2 epochs was not a real cut for it).
+The recovery `chunking_policy` was retrained fresh on top of both.
+
+**Final verification of the recovered, self-consistent pipeline: 0/30
+(NOT 10%).** Distance metrics were comparable to the validated run
+(min=0.167 vs. the original 0.125-0.136, end=0.395 vs. 0.326-0.422) --
+behaviorally in the same ballpark, not obviously broken -- but the
+recovery attempt did not reproduce a nonzero success rate in the one
+attempt there was time for. Consistent with everything else in this
+document about success sitting at a fragile, narrow margin near a
+discrete threshold: comparable approach precision does not guarantee
+comparable success count at this project's scale.
+
+**Given the Sept 4 deadline, further retraining was stopped here** rather
+than attempting more recovery cycles with no time budget left to verify
+them properly. The paper (`documents/paper/via_sdutc_paper.tex`, NOT
+tracked in this repo -- see `docs/HANDOFF.md`) reports the validated 10%
+result from the prior entry, which is real, legitimate, bit-for-bit
+reproduced science -- that finding is not in question. What changed is
+that **the exact checkpoint combination that produced it is no longer on
+disk.**
+
+**Current on-disk checkpoint state (as of 2026-09-03, unchanged since):**
+- `belief.pt`, `world_model.pt`, `goal.pt`, `chunking_policy.pt` are all
+  from this recovery cascade -- mutually consistent with each other, but
+  the *combination* has only been verified at 0/30, not 10%.
+- `utility.pt`, `gate.pt`, `action_prior.pt` (the CEM+MLP pipeline's
+  learned components) are **stale** -- last trained 2026-08-26, against
+  the *original* (now-overwritten) belief/world_model/goal, before any of
+  this section's retraining. Running `eval/eval_libero.py` or
+  `eval/ablations.py` right now would evaluate a mismatched combination
+  and give unreliable numbers, the identical failure mode diagnosed
+  above, now silently latent rather than actively tested. **Do not trust
+  a CEM-pipeline eval run against current checkpoints without first
+  retraining `train/train_decision.py` on top of the current belief.**
+- `configs/local.yaml`'s `world_model.epochs: 2` and `goal.libero_epochs:
+  2` are still the deadline-cut values, not this project's original
+  validated settings (20 and 5 respectively). Anyone retraining `belief`
+  from scratch at full quality should very likely restore those first.
+
+**Status:** this is the honest state of the project as of 2026-09-03.
+Two real, disjoint pieces of evidence exist: (1) action-chunking beating
+the CEM+MLP pipeline ~5-6x, validated and reproduced, real science,
+reported in the paper; (2) the specific checkpoints currently on disk,
+which are self-consistent but unvalidated at better than 0/30. See
+`docs/HANDOFF.md` for what a next session should actually do about this.
+
+---
